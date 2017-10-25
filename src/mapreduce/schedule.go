@@ -1,6 +1,9 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 //
 // schedule() starts and waits for all tasks in the given phase (Map
@@ -25,12 +28,39 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
 
-	// All ntasks tasks have to be scheduled on workers, and only once all of
-	// them have been completed successfully should the function return.
-	// Remember that workers may fail, and that any given worker may finish
-	// multiple tasks.
-	//
-	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-	//
+	taskChannel := make(chan int, ntasks)
+	go func() {
+		for i:=0; i<ntasks; i++ {
+			taskChannel <- i
+		}
+	}()
+	var mutex = &sync.Mutex{}
+	for {
+		taskNum, more := <-taskChannel
+		if !more {
+			break
+		}
+		worker := <- registerChan
+		go func() {
+			args := new(DoTaskArgs)
+			args.File = mapFiles[taskNum]
+			args.JobName = jobName
+			args.Phase = phase
+			args.TaskNumber = taskNum
+			args.NumOtherPhase = n_other
+			ok := call(worker, "Worker.DoTask", args, new(struct{}))
+			if ok == false {
+				taskChannel <- taskNum
+			} else {
+				mutex.Lock()
+				ntasks--
+				if ntasks == 0 {
+					close(taskChannel)
+				}
+				mutex.Unlock()
+			}
+			registerChan <- worker
+		} ()
+	}
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }

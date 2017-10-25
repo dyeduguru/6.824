@@ -1,5 +1,11 @@
 package mapreduce
 
+import (
+	"os"
+	"bufio"
+	"encoding/json"
+)
+
 // doReduce manages one reduce task: it reads the intermediate
 // key/value pairs (produced by the map phase) for this task, sorts the
 // intermediate key/value pairs by key, calls the user-defined reduce function
@@ -42,5 +48,28 @@ func doReduce(
 	// 	enc.Encode(KeyValue{key, reduceF(...)})
 	// }
 	// file.Close()
-	//
+	keyValues := make(map[string][]string)
+	for i := 0; i < nMap; i++ {
+		reduceFileName := reduceName(jobName, i, reduceTaskNumber)
+		reduceFile, err := os.OpenFile(reduceFileName, os.O_RDONLY, 0777)
+		check_err(err)
+		reduceFileReader := bufio.NewReader(reduceFile)
+		dec := json.NewDecoder(reduceFileReader)
+		var keyValue KeyValue
+		for err == nil {
+			err = dec.Decode(&keyValue)
+			keyValues[keyValue.Key] = append(keyValues[keyValue.Key], keyValue.Value)
+		}
+		reduceFile.Close()
+	}
+	for key := range keyValues {
+		mergeFileName := mergeName(jobName, reduceTaskNumber)
+		mergeFile, err := os.OpenFile(mergeFileName, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0777)
+		check_err(err)
+		mergeFileWriter := bufio.NewWriter(mergeFile)
+		enc := json.NewEncoder(mergeFileWriter)
+		enc.Encode(KeyValue{key, reduceF(key, keyValues[key])})
+		mergeFileWriter.Flush()
+		mergeFile.Close()
+	}
 }
